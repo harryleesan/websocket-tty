@@ -1,0 +1,10 @@
+version: "3.9"
+services:
+  websocket-tty:
+    container_name: websocket
+    image: halosan/websocket-tty:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./main.go:/go/src/app/main.go
+    command: ["tail", "-f", "/dev/null"]

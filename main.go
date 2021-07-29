@@ -1,7 +1,8 @@
 package main
 
 import (
-    "code.google.com/p/go.net/websocket"
+		// "code.google.com/p/go.net/websocket"
+		"github.com/gorilla/websocket"
     "net/http"
     "os/exec"
     "log"
@@ -19,34 +20,49 @@ type Response struct {
     Error string
 }
 
-func execHandler(ws *websocket.Conn) {
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
+
+// func execHandler(ws *websocket.Conn) {
+func execHandler(w http.ResponseWriter, r *http.Request) {
     var data Request
+		ws, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Print("upgrade:", err)
+			return
+		}
+		defer ws.Close()
+		for {
+			err := ws.ReadJSON(&data)
+			if err != nil {
+					log.Fatal(err)
+			}
 
-    err := websocket.JSON.Receive(ws, &data)
-    if err != nil {
-        log.Fatal(err)
-    }
+			log.Println("Received request", data)
 
-    log.Println("Received request", data)
+			var out []byte
+			if len(data.Cmd) > 2 && data.Cmd[0:3] == "cd " {
+					out, err = changeWorkingDirectory(data.Cmd[3:])
+			} else {
+					var cmd = exec.Command("bash", []string{"-c", data.Cmd}...)
+					out, err = cmd.CombinedOutput()
+			}
 
-    var out []byte
-    if len(data.Cmd) > 2 && data.Cmd[0:3] == "cd " {
-        out, err = changeWorkingDirectory(data.Cmd[3:])
-    } else {
-        var cmd = exec.Command("bash", []string{"-c", data.Cmd}...)
-        out, err = cmd.CombinedOutput()
-    }
+			var error = ""
+			if err != nil {
+					log.Println("Error ocurred executing command", err)
+					error = err.Error()
+			}
 
-    var error = ""
-    if err != nil {
-        log.Println("Error ocurred executing command", err)
-        error = err.Error()
-    }
+			err = ws.WriteJSON(Response{Result:string(out), Error:error})
+			if err != nil {
+					log.Fatal("Could not send response", err)
+			}
 
-    err = websocket.JSON.Send(ws, Response{Result:string(out), Error:error})
-    if err != nil {
-        log.Fatal("Could not send response", err)
-    }
+		}
 }
 
 func changeWorkingDirectory(newPath string) (out []byte, err error) {
@@ -87,8 +103,9 @@ func main() {
 
     log.Printf("Starting with working directory '%s'", path)
 
-    http.Handle("/exec", websocket.Handler(execHandler))
-    err = http.ListenAndServe("127.0.0.1:8080", nil)
+    // http.Handle("/exec", websocket.Handler(execHandler))
+		http.HandleFunc("/exec", execHandler)
+    err = http.ListenAndServe("0.0.0.0:8080", nil)
     if err != nil {
         log.Fatal("ListenAndServe:" + err.Error())
     }
